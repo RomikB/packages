@@ -47,6 +47,7 @@ endef
 TARGET_CFLAGS += -Wno-error=implicit-function-declaration
 
 HOST_CONFIGURE_ARGS += \
+	--disable-libelf \
 	--disable-selinux \
 	--with-libiconv=gnu \
 	--with-pcre=internal \
