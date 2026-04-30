@@ -12,14 +12,17 @@ PKG_VERSION:=0.10.1
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
-PKG_SOURCE_URL:=http://www.nih.at/libzip/
+PKG_SOURCE_URL:= \
+	http://www.nih.at/libzip/ \
+	https://libzip.org/download/
+PKG_HASH:=5b1eaf60968cb22df49d73bcaa759961fb27451917ac76b275374c2ed260ce92
 PKG_INSTALL:=1
 
 include $(INCLUDE_DIR)/package.mk
 
 define Package/libzip/default
   TITLE:=libzip
-  URL:=http://www.nih.at/libzip/
+  URL:=https://libzip.org/
 endef
 
 define Package/libzip
