@@ -1,7 +1,9 @@
 #ifndef _UBUS_CXX_HPP
 #define _UBUS_CXX_HPP
 
+extern "C" {
 #include <libubus.h>
+}
 #include <cassert>
 #include <memory>
 #include <mutex>
