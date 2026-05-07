@@ -241,6 +241,7 @@ else
 	MAKE_FLAGS += WITH_WEBSOCKETS=$(if $(CONFIG_MOSQUITTO_LWS),"yes","no")
 	MAKE_FLAGS += WITH_TLS_PSK=$(if $(CONFIG_OPENSSL_WITH_PSK),"yes","no")
 endif
+MAKE_FLAGS += WITH_CJSON=$(if $(CONFIG_PACKAGE_cJSON),"yes","no")
 
 $(eval $(call BuildPackage,mosquitto-ssl))
 $(eval $(call BuildPackage,mosquitto-nossl))
