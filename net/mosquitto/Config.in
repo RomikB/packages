@@ -1,6 +1,7 @@
 config MOSQUITTO_LWS
     bool "libwebsockets support"
     depends on PACKAGE_mosquitto-ssl
+    default n if TARGET_ipq53xx
     default y
     help
         Includes websockets support in the broker, via libwebsockets
@@ -8,6 +9,7 @@ config MOSQUITTO_LWS
 config MOSQUITTO_CTRL
     bool "Include mosquitto_ctrl utility"
     depends on PACKAGE_mosquitto-ssl
+    default n if TARGET_ipq53xx
     default y
     help
         mosquitto_ctrl is a tool for managing the broker at run time.
@@ -15,6 +17,7 @@ config MOSQUITTO_CTRL
 config MOSQUITTO_DYNAMIC_SECURITY
     bool "Install mosquitto_dynamic_security.so"
     depends on PACKAGE_mosquitto-ssl
+    default n if TARGET_ipq53xx
     default y
     help
         This enables the dynamic security modes documented at
@@ -24,6 +27,7 @@ config MOSQUITTO_DYNAMIC_SECURITY
 config MOSQUITTO_PASSWD
     bool "Include mosquitto_passwd utility"
     depends on PACKAGE_mosquitto-ssl
+    default n if TARGET_ipq53xx
     default y
     help
         mosquitto_passwd is a tool for managing password files for mosquitto.
