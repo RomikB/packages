@@ -11,17 +11,24 @@ help()
 Syntax: mwan3 [command]
 
 Available commands:
-	start           Load iptables rules, ip rules and ip routes
-	stop            Unload iptables rules, ip rules and ip routes
-	restart         Reload iptables rules, ip rules and ip routes
-	ifup <iface>    Load rules and routes for specific interface
-	ifdown <iface>  Unload rules and routes for specific interface
-	interfaces      Show interfaces status
-	policies        Show currently active policy
-	connected       Show directly connected networks
-	rules           Show active rules
-	status          Show all status
+	start             Load iptables rules, ip rules and ip routes
+	stop              Unload iptables rules, ip rules and ip routes
+	restart           Reload iptables rules, ip rules and ip routes
+	ifup <iface>      Load rules and routes for specific interface
+	ifdown <iface>    Unload rules and routes for specific interface
+	interfaces        Show interfaces status
+	policies          Show currently active policy
+	connected         Show directly connected networks
+	rules             Show active rules
+	status            Show all status
 
+	init_dev_rules    Init device rule tables
+	add_device        Add rules for device
+			- add_device <mac> <ipaddr> <ipv4|ipv6>
+	del_device        Delete rules for device
+			- del_device <mac>
+	devices      	  Show all devices rules
+	curr_wan <family> Get current used wan interface
 EOF
 }
 
@@ -43,7 +50,7 @@ ifdown()
 
 ifup()
 {
-	local device enabled up l3_device
+	local device enabled up l3_device itfstatus
 
 	config_load mwan3
 
@@ -61,15 +68,18 @@ ifup()
 		exit 0
 	}
 
-	json_load $(ubus -S call network.interface.$1 status)
-	json_get_vars up l3_device
-	config_get enabled "$1" enabled 0
+	itfstatus=$(ubus -S call network.interface.$1 status)
+	[ -n "$itfstatus" ] && {
+		json_load $itfstatus
+		json_get_vars up l3_device
+		config_get enabled "$1" enabled 0
 
-	if [ "$up" -eq 1 ] \
-		&& [ -n "$l3_device" ] \
-		&& [ "$enabled" -eq 1 ]; then
-		ACTION=ifup INTERFACE=$1 DEVICE=$l3_device /sbin/hotplug-call iface
-	fi
+		if [ "$up" -eq 1 ] \
+			&& [ -n "$l3_device" ] \
+			&& [ "$enabled" -eq 1 ]; then
+			ACTION=ifup INTERFACE=$1 DEVICE=$l3_device /sbin/hotplug-call iface
+		fi
+	}
 }
 
 interfaces()
@@ -121,31 +131,25 @@ status()
 
 start()
 {
-	local enabled src_ip local_source
+	local enabled route_type
 
 	config_load mwan3
 	config_get_bool enabled globals 'enabled' 0
-	[ ${enabled} -gt 0 ] || {
+	[ "${enabled}" -gt 0 ] || {
 		echo "Warning: mwan3 is global disabled. Usage: /etc/init.d/mwan3 start"
 		exit 0
 	}
 
-	config_get local_source globals local_source 'none'
-	[ "${local_source}" = "none" ] || {
-		src_ip=$(uci_get_state mwan3 globals src_ip)
-		[ "${src_ip}" != "" ] && {
-			ip route del default via "${src_ip}" dev lo 1>/dev/null 2>&1
-			ip addr del "${src_ip}/32" dev lo 1>/dev/null 2>&1
-		}
+	route_type="$(mwan3_routing_type)"
+	[ "$route_type" = "0" ] && exit 0
 
-		network_get_ipaddr src_ip "${local_source}"
-		if [ "${src_ip}" = "" ]; then
-			$LOG warn "Unable to set source ip for own initiated traffic (${local_source})"
-		else
-			ip addr add "${src_ip}/32" dev lo
-			ip route add default via "${src_ip}" dev lo
-			uci_toggle_state mwan3 globals src_ip "${src_ip}"
-		fi
+	# init interfaces
+	mwan3_init_interfaces
+
+	[ "$route_type" = "2" ] && {
+		mwan3_create_devices_ipset
+		# load device rules
+		config_foreach mwan3_load_iface_device device
 	}
 
 	config_foreach ifup interface
@@ -153,7 +157,7 @@ start()
 
 stop()
 {
-	local ipset route rule table IP IPT pid src_ip
+	local ipset route rule table IP IPT pid
 
 	for pid in $(pgrep -f "mwan3track"); do
 		kill -TERM "$pid" > /dev/null 2>&1
@@ -164,28 +168,43 @@ stop()
 	config_load mwan3
 	config_foreach mwan3_track_clean interface
 
+	mwan3_lock
+
 	for IP in "$IP4" "$IP6"; do
 
 		for route in $(seq 1 $MWAN3_INTERFACE_MAX); do
-			$IP route flush table $route &> /dev/null
+			$IP route flush table $route > /dev/null
 		done
 
 		for rule in $($IP rule list | egrep '^[1-2][0-9]{3}\:' | cut -d ':' -f 1); do
-			$IP rule del pref $rule &> /dev/null
+			$IP rule del pref $rule > /dev/null
 		done
 	done
 
 	for IPT in "$IPT4" "$IPT6"; do
 
-		$IPT -D PREROUTING -j mwan3_hook &> /dev/null
-		$IPT -D OUTPUT -j mwan3_hook &> /dev/null
+		$IPT -D PREROUTING -j mwan3_hook > /dev/null
+		$IPT -D OUTPUT -j mwan3_hook > /dev/null
 
 		for table in $($IPT -S | awk '{print $2}' | grep mwan3 | sort -u); do
-			$IPT -F $table &> /dev/null
+			$IPT -F $table > /dev/null
 		done
 
 		for table in $($IPT -S | awk '{print $2}' | grep mwan3 | sort -u); do
-			$IPT -X $table &> /dev/null
+			$IPT -X $table > /dev/null
+		done
+	done
+
+	for IPT_F in "$IPT4_F" "$IPT6_F"; do
+
+		$IPT_F -D output_wan_rule -j mwan3_iface_out > /dev/null
+
+		for table in $($IPT_F -S | awk '{print $2}' | grep mwan3 | sort -u); do
+			$IPT_F -F $table > /dev/null
+		done
+
+		for table in $($IPT_F -S | awk '{print $2}' | grep mwan3 | sort -u); do
+			$IPT_F -X $table > /dev/null
 		done
 	done
 
@@ -197,14 +216,13 @@ stop()
 		$IPS -q destroy $ipset
 	done
 
-	mwan3_lock_clean
+	# mwan3_lock_clean
 	rm -rf $MWAN3_STATUS_DIR $MWAN3TRACK_STATUS_DIR
 
-	src_ip=$(uci_get_state mwan3 globals src_ip)
-	[ "${src_ip}" = "" ] || {
-		ip route del default via "${src_ip}" dev lo 1>/dev/null 2>&1
-		ip addr del "${src_ip}/32" dev lo 1>/dev/null 2>&1
-	}
+	mwan3_unlock
+
+	# init interfaces
+	mwan3_init_interfaces
 }
 
 restart() {
@@ -212,10 +230,101 @@ restart() {
 	start
 }
 
+add_device(){
+	local mac="$1"
+	local ipaddr="$2"
+	local family="$3"
+	local interface deviceId old_ipaddr
+
+	deviceId=$(mwan3_get_device_id "$mac")
+
+	config_load mwan3
+	config_get interface "$deviceId" interface ""
+
+	if [ -n "$interface" ]; then
+
+		old_ipaddr=$(uci_get_state mwan3 "$deviceId" "$family")
+		if [ -n "$old_ipaddr" ]; then
+			mwan3_del_iface_device "$interface" "$old_ipaddr" "$family"
+		fi
+
+		mwan3_add_iface_device "$interface" "$ipaddr" "$family"
+		uci_toggle_state mwan3 "$deviceId" "$family" "$ipaddr"
+
+		# cleanup conntrack entries of this device
+		conntrack -D --src "$ipaddr"
+	fi
+}
+
+del_device(){
+	local mac="$1"
+	local ipaddr
+	local deviceId
+
+	[ $# != 1 ] && return
+
+	deviceId=$(mwan3_get_device_id "$mac")
+
+	config_load mwan3
+	config_get interface $deviceId interface ""
+
+	if [ -n "$interface" ]; then
+
+		for family in ipv4 ipv6; do
+
+			ipaddr=$(uci_get_state mwan3 $deviceId $family)
+			if [ -n "$ipaddr" ]; then
+				mwan3_del_iface_device $interface $ipaddr $family
+				uci_revert_state mwan3 $deviceId $family
+			fi
+		done
+	fi
+}
+
+init_dev_rules(){
+	mwan3_init_iface_device_rules
+}
+
+devices(){
+	config_load mwan3
+
+	echo "Device rules:"
+	mwan3_report_devices_rules
+}
+
+get_current_wan(){
+	local family=$1
+	local result=""
+
+	result=$(mwan3_get_current_wan $family)
+
+	echo "$result"
+}
+
 case "$1" in
-	ifup|ifdown|interfaces|policies|connected|rules|status|start|stop|restart)
+	ifup|ifdown|interfaces|policies|connected|rules|status|start|stop|restart|devices)
 		mwan3_init
-		$*
+		"$@"
+	;;
+	add_device)
+		[ "$#" != 4 ] && {
+			help
+			exit 1
+		}
+		add_device $2 $3 $4
+	;;
+	del_device)
+		[ "$#" != 2 ] && {
+			help
+			exit 1
+		}
+		del_device $2
+	;;
+	curr_wan)
+		get_current_wan $2
+	;;
+	init_dev_rules)
+		init_dev_rules
 	;;
 	*)
 		help
