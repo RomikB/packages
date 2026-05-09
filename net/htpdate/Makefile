@@ -51,11 +51,6 @@ endef
 define Package/htpdate/install
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/htpdate $(1)/usr/sbin/
-	$(INSTALL_DIR) $(1)/etc/config/
-	$(INSTALL_CONF) ./files/htpdate.conf $(1)/etc/config/htpdate
-	$(INSTALL_DIR) $(1)/etc/init.d/
-	$(INSTALL_BIN) ./files/htpdate.init $(1)/etc/init.d/htpdate
 endef
 
 $(eval $(call BuildPackage,htpdate))
-
